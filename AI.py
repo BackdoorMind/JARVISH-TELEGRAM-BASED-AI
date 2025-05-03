@@ -1936,7 +1936,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 
-
 async def exit_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Check if the user sent the /exitscript command
     command = update.message.text.lower()
@@ -1953,34 +1952,37 @@ async def exit_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await context.application.shutdown()  # This shuts down the application
 
 
-import os
-import subprocess
+
+import requests, os, sys
+from pathlib import Path
 from telegram import Update
 from telegram.ext import ContextTypes
 
-REPO_URL = "https://github.com/BackdoorMind/JARVISH-TELEGRAM-BASED-AI.git"
-CLONE_DIR = "JARVISH-TELEGRAM-BASED-AI"
+GITHUB_RAW_URL = "https://raw.githubusercontent.com/BackdoorMind/JARVISH-TELEGRAM-BASED-AI/main/AI.py"
 
-async def clone_or_update_repo(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def update_jarvis(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
-        if not os.path.exists(CLONE_DIR):
-            await update.message.reply_text("📥 Cloning GitHub repo...")
-            subprocess.run(["git", "clone", REPO_URL], check=True)
-            await update.message.reply_text("✅ Repo cloned successfully.")
+        await update.message.reply_text("⏳ Checking for updates from GitHub...")
+
+        response = requests.get(GITHUB_RAW_URL)
+        if response.status_code == 200:
+            file_path = Path(__file__)
+            with open(file_path, 'wb') as f:
+                f.write(response.content)
+
+            await update.message.reply_text("✅ Jarvis updated successfully from GitHub!\n♻️ Restarting...")
+
+            os.execv(sys.executable, ['python'] + sys.argv)
         else:
-            await update.message.reply_text("🔄 Repo already exists. Pulling latest changes...")
-            subprocess.run(["git", "-C", CLONE_DIR, "pull"], check=True)
-            await update.message.reply_text("✅ Repo updated successfully.")
-    except subprocess.CalledProcessError as e:
-        await update.message.reply_text(f"❌ Git error:\n`{e}`", parse_mode="Markdown")
+            await update.message.reply_text(f"❌ Failed to fetch update. HTTP {response.status_code}")
     except Exception as e:
-        await update.message.reply_text(f"⚠️ Failed:\n`{e}`", parse_mode="Markdown")
+        await update.message.reply_text(f"⚠️ Update failed:\n`{e}`", parse_mode="Markdown")
 
 
 
 
 
-app.add_handler(CommandHandler("updatecode", clone_or_update_repo))
+app.add_handler(CommandHandler("update", update_jarvis))
 app.add_handler(CommandHandler("startsmartalerts", start_smart_alerts))
 app.add_handler(CommandHandler("stopalerts", stop_smart_alerts))
 app.add_handler(CommandHandler("alertfile", get_alert_file))
@@ -2004,9 +2006,9 @@ app.add_handler(CommandHandler("installedapps", list_installed_apps))
 app.add_handler(CommandHandler("startcapture", start_capture))
 app.add_handler(CommandHandler("stopcapture", stop_capture))
 app.add_handler(CommandHandler("shutdown", handle_shutdown))
+app.add_handler(CommandHandler("exit", exit_handler))
 app.add_handler(CommandHandler("cancelshutdown", handle_cancel_shutdown))
 app.add_handler(CommandHandler("speedtest", handle_speedtest))
-app.add_handler(CommandHandler("exit", exit_handler))
 app.add_handler(CommandHandler("opencmd", open_cmd_handler))
 app.add_handler(CommandHandler("exitcmd", handle_message))
 app.add_handler(CommandHandler("help", help_handler))
