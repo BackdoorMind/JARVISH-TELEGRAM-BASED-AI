@@ -3429,52 +3429,79 @@ app.add_handler(CommandHandler("exitscript", restricted_handler(log_command(exit
 #--UPDATE--
 from telegram import Update
 from telegram.ext import ContextTypes
-import requests
 import os
+import subprocess
 import sys
 from pathlib import Path
+import shutil
+import ctypes
+import stat
+
+# Windows-specific: handle read-only file removal
+def handle_remove_readonly(func, path, exc):
+    os.chmod(path, stat.S_IWRITE)
+    func(path)
 
 #--UPDATE--
 async def update_jarvis(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
-        # Check if URL is provided
+        # 🔐 Check admin rights
+        if not ctypes.windll.shell32.IsUserAnAdmin():
+            await update.message.reply_text("❌ Admin privileges required to perform update.\nPlease run this script as administrator.")
+            return
+
         if not context.args:
             await update.message.reply_text(
-                "⚠️ Please provide a GitHub raw file URL.\nUsage: `/update <raw_url>`",
+                "⚠️ Please provide a GitHub repository URL.\nUsage: `/update <repo_url>`",
                 parse_mode="Markdown"
             )
             return
 
-        raw_url = context.args[0]
+        repo_url = context.args[0]
 
-        # Basic validation
-        if not raw_url.startswith("https://raw.githubusercontent.com/") or not raw_url.endswith(".py"):
+        # ✅ Validate GitHub repo URL
+        if not repo_url.startswith("https://github.com/") or not repo_url.endswith(".git"):
             await update.message.reply_text(
-                "❌ Invalid URL. Must be a direct `.py` raw link from GitHub.\nExample:\n`https://raw.githubusercontent.com/user/repo/branch/bot.py`",
+                "❌ Invalid URL. Must be a GitHub repository URL ending in `.git`\nExample:\n`https://github.com/user/repo.git`",
                 parse_mode="Markdown"
             )
             return
 
-        await update.message.reply_text("⏳ Fetching update from GitHub...")
+        await update.message.reply_text("⏳ Cloning the repository...")
 
-        # Download file
-        response = requests.get(raw_url)
-        if response.status_code == 200:
-            file_path = Path(__file__)
-            with open(file_path, 'wb') as f:
-                f.write(response.content)
+        tmp_dir = Path("tmp_update_dir")
+        current_script = Path(__file__).name
 
-            await update.message.reply_text("✅ Update successful!\n♻️ Restarting Jarvis...")
+        # 🧹 Clean up previous temp folder if it exists
+        if tmp_dir.exists():
+            shutil.rmtree(tmp_dir, onerror=handle_remove_readonly)
 
-            # Restart script
-            os.execv(sys.executable, ['python'] + sys.argv)
-        else:
-            await update.message.reply_text(f"❌ Failed to fetch file. HTTP status: {response.status_code}")
+        # 📥 Clone repo
+        subprocess.run(["git", "clone", repo_url, str(tmp_dir)], check=True)
 
+        # 🔄 Replace current script with updated one
+        new_file_path = tmp_dir / current_script
+        if not new_file_path.exists():
+            await update.message.reply_text(
+                f"❌ `{current_script}` not found in the repo root. Please check the repository.",
+                parse_mode="Markdown"
+            )
+            shutil.rmtree(tmp_dir, onerror=handle_remove_readonly)
+            return
+
+        with open(current_script, 'wb') as dest_file, open(new_file_path, 'rb') as src_file:
+            dest_file.write(src_file.read())
+
+        await update.message.reply_text("✅ Update successful from GitHub!\n♻️ Restarting Jarvis...")
+
+        shutil.rmtree(tmp_dir, onerror=handle_remove_readonly)
+
+        os.execv(sys.executable, ['python'] + sys.argv)
+
+    except subprocess.CalledProcessError as e:
+        await update.message.reply_text(f"❌ Git error:\n`{e}`", parse_mode="Markdown")
     except Exception as e:
         await update.message.reply_text(f"⚠️ Update failed:\n`{e}`", parse_mode="Markdown")
-#--END--
-
 
 app.add_handler(CommandHandler("update", restricted_handler(log_command(update_jarvis))))
 #--END--
