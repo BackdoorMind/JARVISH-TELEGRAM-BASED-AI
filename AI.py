@@ -3427,63 +3427,54 @@ app.add_handler(CommandHandler("exitscript", restricted_handler(log_command(exit
 
 
 #--UPDATE--
+from telegram import Update
+from telegram.ext import ContextTypes
+import requests
+import os
+import sys
+from pathlib import Path
+
+#--UPDATE--
 async def update_jarvis(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
+        # Check if URL is provided
         if not context.args:
             await update.message.reply_text(
-                "⚠️ Please provide a GitHub repository URL.\nUsage: `/update <repo_url>`",
+                "⚠️ Please provide a GitHub raw file URL.\nUsage: `/update <raw_url>`",
                 parse_mode="Markdown"
             )
             return
 
-        repo_url = context.args[0]
+        raw_url = context.args[0]
 
-        # Validate it's a GitHub repo URL
-        if not repo_url.startswith("https://github.com/") or not repo_url.endswith(".git"):
+        # Basic validation
+        if not raw_url.startswith("https://raw.githubusercontent.com/") or not raw_url.endswith(".py"):
             await update.message.reply_text(
-                "❌ Invalid URL.\nIt must be a GitHub repository URL ending with `.git`\nExample:\n`https://github.com/user/repo.git`",
+                "❌ Invalid URL. Must be a direct `.py` raw link from GitHub.\nExample:\n`https://raw.githubusercontent.com/user/repo/branch/bot.py`",
                 parse_mode="Markdown"
             )
             return
 
-        await update.message.reply_text("⏳ Cloning the repository...")
+        await update.message.reply_text("⏳ Fetching update from GitHub...")
 
-        # Paths
-        tmp_dir = Path("tmp_update_dir")
-        current_script = Path(__file__).name
+        # Download file
+        response = requests.get(raw_url)
+        if response.status_code == 200:
+            file_path = Path(__file__)
+            with open(file_path, 'wb') as f:
+                f.write(response.content)
 
-        # Clean old temp folder if exists
-        if tmp_dir.exists():
-            shutil.rmtree(tmp_dir)
+            await update.message.reply_text("✅ Update successful!\n♻️ Restarting Jarvis...")
 
-        # Clone the repository into tmp folder
-        subprocess.run(["git", "clone", repo_url, str(tmp_dir)], check=True)
+            # Restart script
+            os.execv(sys.executable, ['python'] + sys.argv)
+        else:
+            await update.message.reply_text(f"❌ Failed to fetch file. HTTP status: {response.status_code}")
 
-        # Locate and overwrite this running file
-        new_file_path = tmp_dir / current_script
-        if not new_file_path.exists():
-            await update.message.reply_text(
-                f"❌ Could not find `{current_script}` in the repo root. Make sure it exists.",
-                parse_mode="Markdown"
-            )
-            shutil.rmtree(tmp_dir)
-            return
-
-        with open(current_script, 'wb') as dest_file, open(new_file_path, 'rb') as src_file:
-            dest_file.write(src_file.read())
-
-        await update.message.reply_text("✅ Jarvis updated successfully from GitHub repo!\n♻️ Restarting...")
-
-        # Clean up
-        shutil.rmtree(tmp_dir)
-
-        # Restart the script
-        os.execv(sys.executable, ['python'] + sys.argv)
-
-    except subprocess.CalledProcessError as e:
-        await update.message.reply_text(f"❌ Git error:\n`{e}`", parse_mode="Markdown")
     except Exception as e:
         await update.message.reply_text(f"⚠️ Update failed:\n`{e}`", parse_mode="Markdown")
+#--END--
+
 
 app.add_handler(CommandHandler("update", restricted_handler(log_command(update_jarvis))))
 #--END--
